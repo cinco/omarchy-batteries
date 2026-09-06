@@ -10,7 +10,7 @@ Panel {
   id: root
   moduleName: "cinco.batteries"
   ipcTarget: "cinco.batteries"
-  // manageIpc: false so this panel owns its handlers outright — the base one
+  // manageIpc: false so this panel owns its handlers outright - the base one
   // has no togglePercentage, and a target permits only a single handler.
   manageIpc: false
   property var batteryInfo: ({})
@@ -24,6 +24,13 @@ Panel {
   property int profileIndex: 0
   property bool cursorActive: false
   readonly property bool showPercentage: setting("showPercentage", false) === true
+  // Unplug reminder for machines without kernel charge_control support: a
+  // notifier (like the 10% low warning), not a hardware cutoff. Stored in
+  // shell.json; any external monitor (e.g. a systemd timer polling sysfs
+  // every 30s) can read reminderEnabled / reminderThreshold from there.
+  readonly property bool reminderEnabled: Model.normalizeReminderEnabled(setting("reminderEnabled", true))
+  readonly property int reminderThreshold: Model.normalizeReminderThreshold(setting("reminderThreshold", 80))
+  readonly property var reminderOptions: Model.reminderOptions
   // With the percentage shown the button paints a text block wider than an
   // icon, so the open-panel mark takes the painted width instead of the
   // icon-sized fraction of the slot the fallback assumes.
@@ -66,31 +73,31 @@ Panel {
   function packSize(device) {
     var wh = Number((device && device.energyCapacity) || 0)
     if (wh <= 0) wh = Number(packInfo(device).full || 0)
-    return wh > 0 ? Math.round(wh) + "Wh" : "—"
+    return wh > 0 ? Math.round(wh) + "Wh" : "-"
   }
 
   function packCycles(device) {
     var cycles = packInfo(device).cycles
-    return cycles ? String(cycles) : "—"
+    return cycles ? String(cycles) : "-"
   }
 
   function packHealth(device) {
     var info = packInfo(device)
     var full = Number(info.full || (device && device.energyCapacity) || 0)
     var design = Number(info.design || 0)
-    if (full <= 0 || design <= 0) return "—"
+    if (full <= 0 || design <= 0) return "-"
     return Math.round((full / design) * 100) + "%"
   }
 
   function packThreshold(device) {
     var info = packInfo(device)
     var stop = info.stop
-    if (!stop) return "—"
+    if (!stop) return "-"
     var start = info.start
     return start && start !== stop ? start + "-" + stop + "%" : stop + "%"
   }
 
-  // A pack moving no current is idle regardless of what state it advertises —
+  // A pack moving no current is idle regardless of what state it advertises -
   // on a Power Bridge machine only one pack charges or drains at a time.
   function packIdle(device) {
     var d = device || {}
@@ -145,7 +152,7 @@ Panel {
       full += Number(info.full || packs[i].energyCapacity || 0)
       design += Number(info.design || 0)
     }
-    return design > 0 && full > 0 ? Math.round((full / design) * 100) + "%" : "—"
+    return design > 0 && full > 0 ? Math.round((full / design) * 100) + "%" : "-"
   }
 
   function deviceLabel(device) {
@@ -154,7 +161,7 @@ Panel {
 
   // omarchy-battery-status reads `upower -e | grep BAT | head -n 1`, so on a
   // dual-battery machine every number it returns describes BAT0 alone while the
-  // icon and progress bar come from the UPower aggregate — the panel ends up
+  // icon and progress bar come from the UPower aggregate - the panel ends up
   // reporting 5% next to a half-full bar. Read the aggregate device directly for
   // the hero row instead, and keep the script's values for single-pack laptops.
   function formatDuration(seconds) {
@@ -301,7 +308,7 @@ Panel {
 
   function updateKeyValue(raw, targetName) {
     var next = Model.parseKeyValue(raw)
-    // Keep last known good data if a refresh briefly returns nothing — happens
+    // Keep last known good data if a refresh briefly returns nothing - happens
     // around AC plug/unplug events. Avoids the section collapsing mid-transition.
     if (Object.keys(next).length === 0) return
     if (targetName === "battery") batteryInfo = next
@@ -341,6 +348,22 @@ Panel {
     if (root.bar && root.bar.shell) root.bar.shell.updateEntryInline(root.moduleName, root.settings)
   }
 
+  function setReminderEnabled(enabled) {
+    root.settings = Object.assign({}, root.settings, { reminderEnabled: !!enabled })
+    if (root.bar && root.bar.shell) root.bar.shell.updateEntryInline(root.moduleName, root.settings)
+  }
+
+  function toggleReminder() {
+    root.setReminderEnabled(!root.reminderEnabled)
+  }
+
+  // Picking a level implies ON - same UX as choosing a power profile.
+  function setReminderThreshold(value) {
+    var threshold = Model.normalizeReminderThreshold(value)
+    root.settings = Object.assign({}, root.settings, { reminderThreshold: threshold, reminderEnabled: true })
+    if (root.bar && root.bar.shell) root.bar.shell.updateEntryInline(root.moduleName, root.settings)
+  }
+
   IpcHandler {
     target: "cinco.batteries"
 
@@ -350,6 +373,7 @@ Panel {
     function hide() { root.close() }
     function toggle() { root.toggle() }
     function togglePercentage() { root.togglePercentage() }
+    function toggleReminder() { root.toggleReminder() }
   }
 
   // Compatibility handler. Omarchy's own menu entry and any user script still
@@ -366,6 +390,7 @@ Panel {
     function hide() { root.close() }
     function toggle() { root.toggle() }
     function togglePercentage() { root.togglePercentage() }
+    function toggleReminder() { root.toggleReminder() }
   }
 
   onOpenedChanged: {
@@ -572,7 +597,7 @@ Panel {
 
           Text {
             id: heroPercent
-            text: root.multiBattery ? root.aggregatePercentage : (root.batteryInfo.percentage || "—")
+            text: root.multiBattery ? root.aggregatePercentage : (root.batteryInfo.percentage || "-")
             color: root.bar.foreground
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.displayLarge
@@ -608,7 +633,7 @@ Panel {
             Behavior on width { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
             Behavior on color { ColorAnimation { duration: 220 } }
 
-            // Subtle pulse while charging — visible signal that energy is flowing in.
+            // Subtle pulse while charging - visible signal that energy is flowing in.
             SequentialAnimation on opacity {
               running: root.charging && !root.fullyCharged && root.opened
               loops: Animation.Infinite
@@ -636,7 +661,15 @@ Panel {
             InfoPair { label: "Battery size"; value: root.multiBattery ? root.aggregateSize : (root.batteryInfo.size || "") }
             InfoPair {
               label: root.multiBattery ? "Health" : "Charge cycles"
-              value: root.multiBattery ? root.aggregateHealth : (root.batteryInfo.cycles || "—")
+              value: root.multiBattery ? root.aggregateHealth : (root.batteryInfo.cycles || "-")
+            }
+            // Single-pack only: multi mode already shows Health above.
+            // aggregateHealth sums packMeta full/design, which for one pack
+            // is just its health (sysfs charge_full / charge_full_design).
+            InfoPair {
+              visible: !root.multiBattery
+              label: "Health"
+              value: root.aggregateHealth
             }
           }
 
@@ -647,7 +680,7 @@ Panel {
               label: root.chargeThresholdActive ? "Charge limit" : (root.discharging ? "Time left" : "Time to full")
               value: root.chargeThresholdActive
                 ? (root.batteryInfo.threshold || "-")
-                : (root.batteryFlowIdle ? "-" : ((root.multiBattery ? root.aggregateTime : root.batteryInfo.time) || "—"))
+                : (root.batteryFlowIdle ? "-" : ((root.multiBattery ? root.aggregateTime : root.batteryInfo.time) || "-"))
             }
             InfoPair {
               label: root.chargeThresholdActive ? "Battery state" : (root.discharging ? "Discharging" : "Charging")
@@ -784,6 +817,84 @@ Panel {
                     root.profileIndex = index
                   }
                 }
+              }
+            }
+          }
+        }
+
+        // ---------- Charge reminder ----------
+        // No hardware cutoff where the kernel exposes no charge_control_*
+        // sysfs, so this is an unplug notifier at the chosen level,
+        // mirroring the 10% low-battery warning. External monitors read the
+        // choice from shell.json.
+        PanelSeparator {
+          foreground: root.bar.foreground
+        }
+
+        Column {
+          width: parent.width
+          spacing: Style.space(10)
+
+          Item {
+            width: parent.width
+            implicitHeight: Math.max(reminderTitle.implicitHeight, reminderSwitch.implicitHeight)
+
+            PanelSectionHeader {
+              id: reminderTitle
+              text: "CHARGE REMINDER"
+              foreground: root.bar.foreground
+              fontFamily: root.bar.fontFamily
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+            }
+
+            ToggleSwitch {
+              id: reminderSwitch
+              checked: root.reminderEnabled
+              foreground: root.bar.foreground
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              onToggled: root.toggleReminder()
+            }
+          }
+
+          Text {
+            text: root.reminderEnabled
+              ? "Notify at " + root.reminderThreshold + "% - unplug to preserve health."
+              : "Off - charge to 100% with no reminder."
+            color: root.bar.foreground
+            opacity: 0.6
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            width: parent.width
+            wrapMode: Text.WordWrap
+          }
+
+          Row {
+            id: reminderRow
+            width: parent.width
+            spacing: Style.space(6)
+            opacity: root.reminderEnabled ? 1.0 : 0.45
+
+            readonly property real cellWidth: root.reminderOptions.length > 0
+              ? (width - spacing * (root.reminderOptions.length - 1)) / root.reminderOptions.length
+              : 0
+
+            Repeater {
+              model: root.reminderOptions
+              Button {
+                required property var modelData
+                required property int index
+                width: reminderRow.cellWidth
+                text: modelData + "%"
+                fontSize: Style.font.bodySmall
+                foreground: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+                horizontalPadding: Style.spacing.controlPaddingX
+                verticalPadding: Style.spacing.controlPaddingY + Style.space(2)
+                bordered: true
+                active: root.reminderEnabled && root.reminderThreshold === modelData
+                onClicked: root.setReminderThreshold(modelData)
               }
             }
           }
