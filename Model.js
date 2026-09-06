@@ -150,6 +150,35 @@ function modeLabel(device, onBattery, states) {
   return "Charging"
 }
 
+// --- charge reminder (unplug notifier) --------------------------------------
+// For machines without kernel charge_control_* files there is no hardware
+// cutoff, so this is a reminder, not a limiter. The panel stores the choice
+// in shell.json (reminderEnabled / reminderThreshold) for external monitors
+// to read.
+//
+// NOTE: QML only sees top-level names in this file (`Model.foo`), NOT
+// anything under `module.exports` (Node-only). Keep the option list and
+// default as top-level `var`s so Panel.qml can bind to them.
+
+var reminderOptions = [80, 85, 90, 95];
+var reminderDefault = 80;
+
+function normalizeReminderThreshold(value) {
+  var n = Math.round(Number(value));
+  if (isNaN(n)) return reminderDefault;
+  var best = reminderOptions[0];
+  for (var i = 1; i < reminderOptions.length; i++) {
+    if (Math.abs(reminderOptions[i] - n) < Math.abs(best - n)) best = reminderOptions[i];
+  }
+  return best;
+}
+
+function normalizeReminderEnabled(value) {
+  // Default ON so a fresh install reminds at 80% without any setup.
+  if (value === undefined || value === null) return true;
+  return value === true || value === "true" || value === 1;
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     clampIndex: clampIndex,
@@ -164,6 +193,10 @@ if (typeof module !== "undefined") {
     batteryLabel: batteryLabel,
     devicePercentage: devicePercentage,
     deviceIcon: deviceIcon,
-    parsePackMeta: parsePackMeta
+    parsePackMeta: parsePackMeta,
+    reminderOptions: reminderOptions,
+    reminderDefault: reminderDefault,
+    normalizeReminderThreshold: normalizeReminderThreshold,
+    normalizeReminderEnabled: normalizeReminderEnabled
   }
 }

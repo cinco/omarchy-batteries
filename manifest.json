@@ -16,7 +16,24 @@
     "description": "Per-pack level, size, cycles, health and charge limit, plus the power profile picker",
     "category": "System",
     "defaultSection": "right",
-    "allowMultiple": false
+    "allowMultiple": false,
+    "schema": [
+      {
+        "key": "reminderEnabled",
+        "type": "boolean",
+        "label": "Charge Reminder",
+        "description": "Notify when charging reaches the reminder level, so you can unplug to preserve battery health.",
+        "defaultValue": true
+      },
+      {
+        "key": "reminderThreshold",
+        "type": "enum",
+        "label": "Reminder Level",
+        "description": "Charging percentage that triggers the unplug reminder.",
+        "options": [80, 85, 90, 95],
+        "defaultValue": 80
+      }
+    ]
   },
   "omarchy": {
     "clonedFrom": "omarchy.power"
