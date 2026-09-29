@@ -31,11 +31,11 @@ In the panel, the aggregate summary on top, then per pack:
 |---|---|
 | Level and icon | UPower, per device |
 | Size | `energyCapacity` (energy-full) |
-| Cycles | sysfs `cycle_count` |
+| Cycles | sysfs `cycle_count`, or the external cache |
 | Health | energy-full ÷ energy-full-design |
 | Time left / Time to full | UPower `timeToEmpty` / `timeToFull` |
 | Draw | `changeRate` |
-| Charge limit | sysfs `charge_control_*_threshold` |
+| Charge limit | sysfs `charge_control_*_threshold`, or the external cache |
 
 Live values come from UPower and update reactively. Cycle count, design
 capacity and charge thresholds are not in Quickshell's `UPowerDevice` API, so a
@@ -44,6 +44,33 @@ same 5-second tick the panel already uses while open.
 
 The charge limit column reflects whatever wrote the thresholds — TLP, a vendor
 tool, or the firmware — without shelling out to `tlp-stat`.
+
+## Firmware that does not expose these attributes
+
+Two of those fields are not always available:
+
+- **Cycle count** comes from ACPI `_BIX`. coreboot does not implement it unless
+  built with `CONFIG_H8_HAS_BAT_INFO_EXTENDED`, so `cycle_count` reads `0`.
+- **Charge thresholds** (`charge_control_*_threshold`) only exist while
+  `thinkpad_acpi` is loaded. On coreboot that module needs `force_load=1`, and on
+  some models leaving it loaded breaks rfkill/Wi-Fi, so it is normally kept
+  unloaded.
+
+For those firmwares the helper also reads an optional external cache. Point
+`OMARCHY_BATTERY_META` at a file in this helper's own TSV format:
+
+```
+name <TAB> cycles <TAB> design_wh <TAB> full_wh <TAB> start <TAB> stop
+```
+
+The default path is `/run/thinkpad-battery-meta/battery-packs.tsv`. A value is
+taken from the cache only when the corresponding sysfs value is missing; with no
+file the helper behaves exactly as before, so this is inert for everyone else.
+
+The plugin deliberately does not create that file: filling it needs root access
+to the embedded controller, which a bar widget neither has nor should ask for.
+It is meant to be produced by a privileged helper — for example a small systemd
+service that reads the EC registers on a coreboot ThinkPad.
 
 ## Requirements
 

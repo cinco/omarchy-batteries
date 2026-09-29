@@ -11,6 +11,24 @@
 
 power_supply_path="${OMARCHY_POWER_SUPPLY_PATH:-/sys/class/power_supply}"
 
+# Firmware such as coreboot/libreboot never exposes cycle count or charge
+# thresholds through sysfs. A privileged helper can drop the values it reads
+# straight from the EC into this cache file, using this script's own TSV format.
+meta_cache="${OMARCHY_BATTERY_META:-/run/thinkpad-battery-meta/battery-packs.tsv}"
+declare -A cached_cycles cached_start cached_stop
+if [[ -r $meta_cache ]]; then
+  # Tab is IFS whitespace, so `read` alone would collapse empty fields and
+  # shift every column; swap tabs for a non-whitespace delimiter first.
+  while IFS= read -r line; do
+    [[ -n $line ]] || continue
+    IFS='|' read -r -a f <<< "${line//$'\t'/|}"
+    [[ -n ${f[0]:-} ]] || continue
+    cached_cycles[${f[0]}]=${f[1]:-}
+    cached_start[${f[0]}]=${f[4]:-}
+    cached_stop[${f[0]}]=${f[5]:-}
+  done < "$meta_cache"
+fi
+
 read_or_dash() {
   [[ -r $1 ]] && cat "$1" 2>/dev/null || echo "-"
 }
@@ -25,6 +43,8 @@ for battery in "$power_supply_path"/*; do
   cycles=$(read_or_dash "$battery/cycle_count")
   # A pack that never reports cycles reads 0; that is "unknown", not "brand new".
   [[ $cycles == "0" ]] && cycles="-"
+  # Fall back to the cache when the firmware does not report cycles at all.
+  [[ $cycles == "-" && -n ${cached_cycles[$name]:-} ]] && cycles=${cached_cycles[$name]}
 
   design="-"
   full="-"
@@ -41,6 +61,10 @@ for battery in "$power_supply_path"/*; do
 
   start=$(read_or_dash "$battery/charge_control_start_threshold")
   stop=$(read_or_dash "$battery/charge_control_end_threshold")
+  # The threshold files only exist while thinkpad_acpi is loaded; use the cache
+  # otherwise (coreboot users keep it unloaded to avoid the rfkill bug).
+  [[ $start == "-" && -n ${cached_start[$name]:-} ]] && start=${cached_start[$name]}
+  [[ $stop == "-" && -n ${cached_stop[$name]:-} ]] && stop=${cached_stop[$name]}
 
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$cycles" "$design" "$full" "$start" "$stop"
 done
