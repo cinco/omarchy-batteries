@@ -27,7 +27,8 @@ Panel {
   // With the percentage shown the button paints a text block wider than an
   // icon, so the open-panel mark takes the painted width instead of the
   // icon-sized fraction of the slot the fallback assumes.
-  readonly property real openPanelIndicatorWidth: (showPercentage || multiBattery) && !button.vertical ? button.glyphPaintedWidth : 0
+  readonly property real openPanelIndicatorWidth: button.vertical ? 0
+    : (button.perPack ? packRow.width : (showPercentage ? button.glyphPaintedWidth : 0))
   readonly property bool batteryPresent: {
     var device = UPower.displayDevice
     return !!(device && device.isPresent)
@@ -466,25 +467,58 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: {
-      if (root.multiBattery && !vertical) {
-        var packs = root.batteries
-        var parts = []
-        for (var i = 0; i < packs.length; i++) {
-          var icon = root.deviceIcon(packs[i])
-          parts.push(root.showPercentage ? root.devicePercentage(packs[i]) + "% " + icon : icon)
-        }
-        return parts.join("  ")
-      }
-      return root.showPercentage && !vertical
-        ? Math.round(root.batteryFraction * 100) + "% " + root.batteryIcon()
-        : root.batteryIcon()
-    }
-    slotSize: {
-      var packs = root.multiBattery && !vertical ? root.batteries.length : 1
-      return Style.bar.iconSlot * packs * (root.showPercentage && !vertical ? 2 : 1)
-    }
+    // BarIconButton paints `text` as a single optically-scaled glyph and the
+    // percentage as a separate `labelText`. One icon slot cannot hold several
+    // packs, so with more than one the button's own glyph stays empty and
+    // packRow below draws a label + glyph pair per pack.
+    readonly property bool perPack: root.multiBattery && !vertical
+    text: perPack ? "" : root.batteryIcon()
+    labelText: !perPack && root.showPercentage && !vertical ? Math.round(root.batteryFraction * 100) + "%" : ""
+    hasVisualContent: perPack || text !== "" || labelText !== ""
+    slotSize: perPack
+      ? packRow.implicitWidth + Style.space(8) * 2
+      : Style.bar.iconSlot * (root.showPercentage && !vertical ? 2 : 1)
     tooltipText: ""
+
+    Row {
+      id: packRow
+      visible: button.perPack
+      x: Math.round((button.width - width) / 2)
+      y: Math.round((button.height - height) / 2)
+      scale: button.pressScale
+      spacing: Style.space(10)
+
+      Repeater {
+        model: button.perPack ? root.batteries : []
+
+        Row {
+          required property var modelData
+          spacing: Style.space(4)
+
+          Text {
+            visible: root.showPercentage
+            height: button.canvasSize
+            verticalAlignment: Text.AlignVCenter
+            textFormat: Text.PlainText
+            text: root.devicePercentage(modelData) + "%"
+            font.family: button.fontFamily
+            font.pixelSize: button.fontSize
+            color: button.foreground
+            renderType: Text.NativeRendering
+          }
+
+          OpticalGlyph {
+            width: button.canvasSize
+            height: button.canvasSize
+            text: root.deviceIcon(modelData)
+            fontFamily: button.fontFamily
+            fontSize: button.fontSize
+            paintedSize: button.visualIconSize
+            color: button.foreground
+          }
+        }
+      }
+    }
     onPressed: function(b) {
       if (!root.batteryPresent) return
       if (b === Qt.RightButton) root.togglePercentage()
