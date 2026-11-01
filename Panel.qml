@@ -24,11 +24,14 @@ Panel {
   property int profileIndex: 0
   property bool cursorActive: false
   readonly property bool showPercentage: setting("showPercentage", false) === true
-  // With the percentage shown the button paints a text block wider than an
-  // icon, so the open-panel mark takes the painted width instead of the
-  // icon-sized fraction of the slot the fallback assumes.
+  // Several packs on a horizontal bar get one BarIconButton each (packRow);
+  // a single pack or a vertical bar keeps the one aggregate button.
+  readonly property bool perPack: multiBattery && !button.vertical
+  // With the percentage shown, or with several packs, the widget paints more
+  // than one icon, so the open-panel mark takes the painted extent instead of
+  // the icon-sized fraction of the slot the fallback assumes.
   readonly property real openPanelIndicatorWidth: button.vertical ? 0
-    : (button.perPack ? packRow.width : (showPercentage ? button.glyphPaintedWidth : 0))
+    : (perPack ? packRow.paintedExtent : (showPercentage ? button.glyphPaintedWidth : 0))
   readonly property bool batteryPresent: {
     var device = UPower.displayDevice
     return !!(device && device.isPresent)
@@ -51,6 +54,12 @@ Panel {
     return out
   }
   readonly property bool multiBattery: batteries.length > 1
+
+  function handlePress(b) {
+    if (!batteryPresent) return
+    if (b === Qt.RightButton) togglePercentage()
+    else toggle()
+  }
 
   function deviceIcon(device) {
     return Model.deviceIcon(device, upowerStates())
@@ -386,8 +395,8 @@ Panel {
   onBatteryPresentChanged: if (!batteryPresent) close()
 
   visible: batteryPresent
-  implicitWidth: batteryPresent ? button.implicitWidth : 0
-  implicitHeight: batteryPresent ? button.implicitHeight : 0
+  implicitWidth: batteryPresent ? (perPack ? packRow.implicitWidth : button.implicitWidth) : 0
+  implicitHeight: batteryPresent ? (perPack ? packRow.implicitHeight : button.implicitHeight) : 0
 
   Process {
     id: batteryProc
@@ -463,72 +472,77 @@ Panel {
     }
   }
 
+  // A single pack, or any vertical bar, uses one BarIconButton exactly like
+  // the built-in omarchy.power widget: `text` is the glyph, `labelText` the
+  // percentage.
   BarIconButton {
     id: button
     anchors.fill: parent
     bar: root.bar
-    // BarIconButton paints `text` as a single optically-scaled glyph and the
-    // percentage as a separate `labelText`. One icon slot cannot hold several
-    // packs, so with more than one the button's own glyph stays empty and
-    // packRow below draws a label + glyph pair per pack.
-    readonly property bool perPack: root.multiBattery && !vertical
-    text: perPack ? "" : root.batteryIcon()
-    labelText: !perPack && root.showPercentage && !vertical ? Math.round(root.batteryFraction * 100) + "%" : ""
-    hasVisualContent: perPack || text !== "" || labelText !== ""
-    slotSize: perPack
-      ? packRow.implicitWidth + Style.space(8) * 2
-      : Style.bar.iconSlot * (root.showPercentage && !vertical ? 2 : 1)
+    visible: !root.perPack
+    text: root.batteryIcon()
+    labelText: root.showPercentage && !vertical ? Math.round(root.batteryFraction * 100) + "%" : ""
+    slotSize: Style.bar.iconSlot * (root.showPercentage && !vertical ? 2 : 1)
     tooltipText: ""
+    onPressed: function(b) { root.handlePress(b) }
+  }
 
-    Row {
-      id: packRow
-      visible: button.perPack
-      x: Math.round((button.width - width) / 2)
-      y: Math.round((button.height - height) / 2)
-      scale: button.pressScale
-      spacing: Style.space(10)
+  // Several packs on a horizontal bar: one BarIconButton per pack, each with
+  // its own glyph and percentage, so every pack is drawn, sized and aligned by
+  // Omarchy's own button instead of a reimplementation of its internals.
+  // Each button takes its own hover and press feedback.
+  Row {
+    id: packRow
+    anchors.centerIn: parent
+    visible: root.perPack
+    spacing: 0
 
-      Repeater {
-        model: button.perPack ? root.batteries : []
+    // Span from the left edge of the first pack's painted content to the
+    // right edge of the last one's, for the open-panel mark.
+    readonly property real paintedExtent: {
+      var first = null, last = null
+      for (var i = 0; i < children.length; i++) {
+        var c = children[i]
+        if (!c || !c.visible || c.contentWidth === undefined) continue
+        if (!first) first = c
+        last = c
+      }
+      if (!first) return 0
+      var left = first.x + (first.width - first.contentWidth) / 2
+      var right = last.x + (last.width + last.contentWidth) / 2
+      return right - left
+    }
 
-        Row {
-          required property var modelData
-          spacing: Style.space(4)
+    Repeater {
+      model: root.perPack ? root.batteries : []
 
-          Text {
-            visible: root.showPercentage
-            height: button.canvasSize
-            verticalAlignment: Text.AlignVCenter
-            textFormat: Text.PlainText
-            text: root.devicePercentage(modelData) + "%"
-            font.family: button.fontFamily
-            font.pixelSize: button.fontSize
-            color: button.foreground
-            renderType: Text.NativeRendering
-          }
+      BarIconButton {
+        id: packButton
+        required property var modelData
+        bar: root.bar
+        text: root.deviceIcon(modelData)
+        labelText: root.showPercentage ? root.devicePercentage(modelData) + "%" : ""
+        slotSize: Style.bar.iconSlot * (root.showPercentage ? 2 : 1)
+        tooltipText: ""
+        // Width of what BarIconButton paints: the icon canvas plus, with the
+        // percentage shown, the label and the gap it leaves before the icon.
+        readonly property real contentWidth: canvasSize
+          + (labelText !== "" ? pctMetrics.advanceWidth + Style.space(4) : 0)
+        onPressed: function(b) { root.handlePress(b) }
 
-          OpticalGlyph {
-            width: button.canvasSize
-            height: button.canvasSize
-            text: root.deviceIcon(modelData)
-            fontFamily: button.fontFamily
-            fontSize: button.fontSize
-            paintedSize: button.visualIconSize
-            color: button.foreground
-          }
+        TextMetrics {
+          id: pctMetrics
+          font.family: packButton.fontFamily
+          font.pixelSize: packButton.fontSize
+          text: packButton.labelText
         }
       }
-    }
-    onPressed: function(b) {
-      if (!root.batteryPresent) return
-      if (b === Qt.RightButton) root.togglePercentage()
-      else root.toggle()
     }
   }
 
   KeyboardPanel {
     id: panel
-    anchorItem: button
+    anchorItem: root.perPack ? packRow : button
     owner: root
     bar: root.bar
     open: root.opened && root.batteryPresent
