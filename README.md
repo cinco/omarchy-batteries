@@ -57,20 +57,42 @@ Two of those fields are not always available:
   unloaded.
 
 For those firmwares the helper also reads an optional external cache. Point
-`OMARCHY_BATTERY_META` at a file in this helper's own TSV format:
+`OMARCHY_BATTERY_META` at a file in this helper's own TSV format, one row per
+pack:
 
 ```
 name <TAB> cycles <TAB> design_wh <TAB> full_wh <TAB> start <TAB> stop
 ```
 
-The default path is `/run/thinkpad-battery-meta/battery-packs.tsv`. A value is
-taken from the cache only when the corresponding sysfs value is missing; with no
-file the helper behaves exactly as before, so this is inert for everyone else.
+The default path is `/run/thinkpad-battery-meta/battery-packs.tsv`. Note that
+the variable has to reach the shell's own environment, so in practice the
+default path is the one that matters.
+
+- Only **cycles** and the **charge limit** are read from it. `design_wh` and
+  `full_wh` always come from sysfs, so those columns can hold `-`.
+- Cycles are used only when sysfs reports none (missing or `0`). A cached `0`
+  also counts as unknown.
+- The charge limit is one setting: `stop` is required, and `start` may be `-`
+  on firmware that only has an end threshold. It is used only when sysfs has
+  neither threshold, so a start from one source never appears next to an end
+  from the other.
+- Values that are not plain numbers are ignored. With no file, or one that
+  cannot be read, the helper behaves exactly as before, so this is inert for
+  everyone else.
+- The per-pack stats only appear with more than one battery. A single pack
+  shows the built-in summary, which does not use this helper.
+
+The values are shown as they are, with no age check. Whatever writes the file
+should refresh it when a pack is swapped. Otherwise a new bay battery shows the
+previous pack's cycles until the next refresh. Keeping the file under `/run`
+clears it on reboot.
 
 The plugin deliberately does not create that file: filling it needs root access
 to the embedded controller, which a bar widget neither has nor should ask for.
-It is meant to be produced by a privileged helper — for example a small systemd
-service that reads the EC registers on a coreboot ThinkPad.
+It is meant to be produced by a privileged helper that *reads* the EC registers
+on a coreboot ThinkPad. Avoid helpers that write to EC RAM, for example to
+select a register page: a bad write can leave charging or the fan in an
+undefined state.
 
 ## Requirements
 

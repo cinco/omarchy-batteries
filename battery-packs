@@ -14,18 +14,35 @@ power_supply_path="${OMARCHY_POWER_SUPPLY_PATH:-/sys/class/power_supply}"
 # Firmware such as coreboot/libreboot never exposes cycle count or charge
 # thresholds through sysfs. A privileged helper can drop the values it reads
 # straight from the EC into this cache file, using this script's own TSV format.
+# Only cycles and the threshold pair are read from it; the design_wh and full_wh
+# columns are ignored, since sysfs always has those.
 meta_cache="${OMARCHY_BATTERY_META:-/run/thinkpad-battery-meta/battery-packs.tsv}"
 declare -A cached_cycles cached_start cached_stop
-if [[ -r $meta_cache ]]; then
+
+is_count() { [[ $1 =~ ^[0-9]+$ ]]; }
+
+# -f as well as -r: a directory or a FIFO at that path must not stall the bar.
+if [[ -f $meta_cache && -r $meta_cache ]]; then
   # Tab is IFS whitespace, so `read` alone would collapse empty fields and
-  # shift every column; swap tabs for a non-whitespace delimiter first.
-  while IFS= read -r line; do
-    [[ -n $line ]] || continue
+  # shift every column; swap tabs for a non-whitespace delimiter first. The
+  # `|| -n $line` keeps a last row that has no trailing newline.
+  while IFS= read -r line || [[ -n $line ]]; do
+    line=${line%$'\r'}
     IFS='|' read -r -a f <<< "${line//$'\t'/|}"
-    [[ -n ${f[0]:-} ]] || continue
-    cached_cycles[${f[0]}]=${f[1]:-}
-    cached_start[${f[0]}]=${f[4]:-}
-    cached_stop[${f[0]}]=${f[5]:-}
+    name=${f[0]:-}
+    [[ $name =~ ^[A-Za-z0-9_]+$ ]] || continue
+    # Anything that is not a plain number is ignored rather than shown, and a
+    # cached 0 is "unknown" exactly as a sysfs 0 is.
+    cycles=${f[1]:-}
+    is_count "$cycles" && [[ $cycles != 0 ]] && cached_cycles[$name]=$cycles
+    # The thresholds are one setting: the end is required, the start may be
+    # "-" on firmware that only has an end threshold.
+    start=${f[4]:-}
+    stop=${f[5]:-}
+    if is_count "$stop" && { is_count "$start" || [[ $start == "-" ]]; }; then
+      cached_start[$name]=$start
+      cached_stop[$name]=$stop
+    fi
   done < "$meta_cache"
 fi
 
@@ -62,9 +79,13 @@ for battery in "$power_supply_path"/*; do
   start=$(read_or_dash "$battery/charge_control_start_threshold")
   stop=$(read_or_dash "$battery/charge_control_end_threshold")
   # The threshold files only exist while thinkpad_acpi is loaded; use the cache
-  # otherwise (coreboot users keep it unloaded to avoid the rfkill bug).
-  [[ $start == "-" && -n ${cached_start[$name]:-} ]] && start=${cached_start[$name]}
-  [[ $stop == "-" && -n ${cached_stop[$name]:-} ]] && stop=${cached_stop[$name]}
+  # otherwise (coreboot users keep it unloaded to avoid the rfkill bug). The
+  # pair is taken whole and only when sysfs has neither end, so the panel never
+  # shows a start from one source next to an end from the other.
+  if [[ $start == "-" && $stop == "-" && -n ${cached_stop[$name]:-} ]]; then
+    start=${cached_start[$name]}
+    stop=${cached_stop[$name]}
+  fi
 
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$cycles" "$design" "$full" "$start" "$stop"
 done
