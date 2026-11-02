@@ -27,9 +27,10 @@ Panel {
   // Several packs on a horizontal bar get one BarIconButton each (packRow);
   // a single pack or a vertical bar keeps the one aggregate button.
   readonly property bool perPack: multiBattery && !button.vertical
-  // With the percentage shown, or with several packs, the widget paints more
-  // than one icon, so the open-panel mark takes the painted extent instead of
-  // the icon-sized fraction of the slot the fallback assumes.
+  // The open-panel mark, instead of the icon-sized fraction of the slot the
+  // bar falls back to: a single pack with the percentage takes the glyph
+  // width, as omarchy.power does; several packs take packRow's painted extent,
+  // labels included.
   readonly property real openPanelIndicatorWidth: button.vertical ? 0
     : (perPack ? packRow.paintedExtent : (showPercentage ? button.glyphPaintedWidth : 0))
   readonly property bool batteryPresent: {
@@ -497,8 +498,10 @@ Panel {
     visible: root.perPack
     spacing: 0
 
-    // Span from the left edge of the first pack's painted content to the
-    // right edge of the last one's, for the open-panel mark.
+    // Length of the open-panel mark: it covers the first pack's painted
+    // content to the last one's. The bar centres the mark on the slot, so the
+    // span is made symmetric about the row's centre; packs with labels of
+    // different widths (100% and 9%) would otherwise leave it off-centre.
     readonly property real paintedExtent: {
       var first = null, last = null
       for (var i = 0; i < children.length; i++) {
@@ -510,7 +513,8 @@ Panel {
       if (!first) return 0
       var left = first.x + (first.width - first.contentWidth) / 2
       var right = last.x + (last.width + last.contentWidth) / 2
-      return right - left
+      var mid = width / 2
+      return 2 * Math.max(mid - left, right - mid)
     }
 
     Repeater {
@@ -524,8 +528,9 @@ Panel {
         labelText: root.showPercentage ? root.devicePercentage(modelData) + "%" : ""
         slotSize: Style.bar.iconSlot * (root.showPercentage ? 2 : 1)
         tooltipText: ""
-        // Width of what BarIconButton paints: the icon canvas plus, with the
-        // percentage shown, the label and the gap it leaves before the icon.
+        // Width of what BarIconButton paints. Mirrors its content.width
+        // (canvasSize + label + Style.space(4)), which it does not expose:
+        // keep in sync with Ui/BarIconButton.qml.
         readonly property real contentWidth: canvasSize
           + (labelText !== "" ? pctMetrics.advanceWidth + Style.space(4) : 0)
         onPressed: function(b) { root.handlePress(b) }
@@ -542,7 +547,9 @@ Panel {
 
   KeyboardPanel {
     id: panel
-    anchorItem: root.perPack ? packRow : button
+    // button spans the whole widget even while hidden, so it anchors the
+    // panel in both layouts and a pack hot-swap never moves the anchor.
+    anchorItem: button
     owner: root
     bar: root.bar
     open: root.opened && root.batteryPresent
