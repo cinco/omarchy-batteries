@@ -76,11 +76,18 @@ default path is the one that matters.
   on firmware that only has an end threshold. It is used only when sysfs has
   neither threshold, so a start from one source never appears next to an end
   from the other.
-- Values that are not plain numbers are ignored. With no file, or one that
-  cannot be read, the helper behaves exactly as before, so this is inert for
-  everyone else.
+- Values that are not plain numbers in range are ignored: cycles up to six
+  digits, `stop` from 1 to 100, and `start` below `stop`. Blanks around a number
+  are fine. Rows longer than 128 bytes, and files over 16 KiB, are ignored. With
+  no file, or one that cannot be read, the helper behaves exactly as before, so
+  this is inert for everyone else.
 - The per-pack stats only appear with more than one battery. A single pack
   shows the built-in summary, which does not use this helper.
+
+Write the file atomically (to a temporary file in the same directory, then
+`mv`), and keep it owned by root with mode `0644`. A last row without a newline
+is only used when it has all six columns, but a reader can still catch a file
+rewritten in place halfway through.
 
 The values are shown as they are, with no age check. Whatever writes the file
 should refresh it when a pack is swapped. Otherwise a new bay battery shows the

@@ -11,40 +11,77 @@
 
 power_supply_path="${OMARCHY_POWER_SUPPLY_PATH:-/sys/class/power_supply}"
 
-# Firmware such as coreboot/libreboot never exposes cycle count or charge
-# thresholds through sysfs. A privileged helper can drop the values it reads
-# straight from the EC into this cache file, using this script's own TSV format.
+# Firmware such as coreboot/libreboot often does not expose cycle count or
+# charge thresholds through sysfs. A privileged helper can drop the values it
+# reads from the EC into this cache file, using this script's own TSV format.
 # Only cycles and the threshold pair are read from it; the design_wh and full_wh
 # columns are ignored, since sysfs always has those.
 meta_cache="${OMARCHY_BATTERY_META:-/run/thinkpad-battery-meta/battery-packs.tsv}"
+meta_max_bytes=16384
 declare -A cached_cycles cached_start cached_stop
 
-is_count() { [[ $1 =~ ^[0-9]+$ ]]; }
+# Prints a cache field as a plain decimal in 0..max, or fails. Surrounding
+# blanks are dropped (od-style producers pad numbers); anything else that is not
+# a short run of digits is rejected rather than shown.
+cache_number() {
+  local v=$1 max=$2
+  v=${v#"${v%%[![:space:]]*}"}
+  v=${v%"${v##*[![:space:]]}"}
+  [[ $v =~ ^[0-9]{1,6}$ ]] || return 1
+  v=$((10#$v))
+  (( v <= max )) || return 1
+  printf '%s' "$v"
+}
 
-# -f as well as -r: a directory or a FIFO at that path must not stall the bar.
-if [[ -f $meta_cache && -r $meta_cache ]]; then
-  # Tab is IFS whitespace, so `read` alone would collapse empty fields and
-  # shift every column; swap tabs for a non-whitespace delimiter first. The
-  # `|| -n $line` keeps a last row that has no trailing newline.
-  while IFS= read -r line || [[ -n $line ]]; do
-    line=${line%$'\r'}
-    IFS='|' read -r -a f <<< "${line//$'\t'/|}"
+load_meta_cache() {
+  local meta line name cycles start stop complete LC_ALL=C
+  local -a f
+
+  [[ -f $meta_cache && -r $meta_cache ]] || return 0
+  # Read through head with a byte cap and a timeout, so a huge file, or a path
+  # swapped for a FIFO after the -f test, cannot stall the bar. A file over the
+  # cap is ignored whole rather than read up to an arbitrary cut. The trailing
+  # "x" keeps the final newline, if any, from being stripped by $(...).
+  meta=$(timeout 1 head -c $((meta_max_bytes + 1)) -- "$meta_cache" 2>/dev/null | tr -d '\0'; echo x)
+  meta=${meta%x}
+  (( ${#meta} <= meta_max_bytes )) || return 0
+
+  while true; do
+    if IFS= read -r line; then
+      complete=1
+    elif [[ -n $line ]]; then
+      complete=0
+    else
+      break
+    fi
+    (( ${#line} <= 128 )) || continue
+    [[ ${line: -1} == $'\r' ]] && line=${line::-1}
+    # Tab is IFS whitespace, so `read` alone would collapse empty fields and
+    # shift every column; swap tabs for a delimiter that never appears in text.
+    IFS=$'\x1f' read -r -a f <<< "${line//$'\t'/$'\x1f'}"
     name=${f[0]:-}
     [[ $name =~ ^[A-Za-z0-9_]+$ ]] || continue
-    # Anything that is not a plain number is ignored rather than shown, and a
-    # cached 0 is "unknown" exactly as a sysfs 0 is.
-    cycles=${f[1]:-}
-    is_count "$cycles" && [[ $cycles != 0 ]] && cached_cycles[$name]=$cycles
-    # The thresholds are one setting: the end is required, the start may be
-    # "-" on firmware that only has an end threshold.
-    start=${f[4]:-}
-    stop=${f[5]:-}
-    if is_count "$stop" && { is_count "$start" || [[ $start == "-" ]]; }; then
-      cached_start[$name]=$start
-      cached_stop[$name]=$stop
+    # A last row without a newline may be a write still in progress ("80"
+    # caught as "8"), so it only counts when every column is there.
+    (( complete || ${#f[@]} >= 6 )) || continue
+    # A cached 0 is "unknown", exactly as a sysfs 0 is.
+    if cycles=$(cache_number "${f[1]:-}" 999999) && (( cycles > 0 )); then
+      cached_cycles[$name]=$cycles
     fi
-  done < "$meta_cache"
-fi
+    # The thresholds are one setting: the end (1..100) is required, the start
+    # may be "-" on firmware that only has an end threshold, and must sit below
+    # the end otherwise.
+    stop=$(cache_number "${f[5]:-}" 100) && (( stop > 0 )) || continue
+    start=${f[4]:-}
+    if [[ $start != "-" ]]; then
+      start=$(cache_number "$start" 99) && (( start < stop )) || continue
+    fi
+    cached_start[$name]=$start
+    cached_stop[$name]=$stop
+  done < <(printf '%s' "$meta")
+}
+
+load_meta_cache
 
 read_or_dash() {
   [[ -r $1 ]] && cat "$1" 2>/dev/null || echo "-"

@@ -4,6 +4,18 @@ All notable changes to this plugin. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- On firmware that does not report cycle count or charge thresholds through
+  sysfs, such as coreboot on ThinkPads, the helper reads them from an optional
+  cache file written by a privileged producer
+  (`/run/thinkpad-battery-meta/battery-packs.tsv`, or `OMARCHY_BATTERY_META`).
+  Sysfs values always win, and with no file nothing changes. The plugin does
+  not ship a producer. Contributed by [@felixzsh](https://github.com/felixzsh)
+  in [#2](https://github.com/cinco/omarchy-batteries/pull/2).
+
 ## [1.0.2] - 2026-11-02
 
 ### Changed
@@ -50,6 +62,7 @@ All notable changes to this plugin. The format follows
   (`clonedFrom: omarchy.power`), and the existing keybinding and menu
   entries keep working.
 
+[Unreleased]: https://github.com/cinco/omarchy-batteries/compare/v1.0.2...HEAD
 [1.0.2]: https://github.com/cinco/omarchy-batteries/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/cinco/omarchy-batteries/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/cinco/omarchy-batteries/releases/tag/v1.0.0
