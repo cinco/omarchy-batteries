@@ -34,36 +34,31 @@ cache_number() {
 }
 
 load_meta_cache() {
-  local meta line name cycles start stop complete LC_ALL=C
+  local meta line name cycles start stop LC_ALL=C
   local -a f
 
   [[ -f $meta_cache && -r $meta_cache ]] || return 0
   # Read through head with a byte cap and a timeout, so a huge file, or a path
   # swapped for a FIFO after the -f test, cannot stall the bar. A file over the
   # cap is ignored whole rather than read up to an arbitrary cut. The trailing
-  # "x" keeps the final newline, if any, from being stripped by $(...).
-  meta=$(timeout 1 head -c $((meta_max_bytes + 1)) -- "$meta_cache" 2>/dev/null | tr -d '\0'; echo x)
+  # "x" keeps the final newline, if any, from being stripped by $(...). NULs
+  # become \x1f rather than vanishing, so they still count toward the cap and
+  # cannot join digits; any row holding one is dropped below.
+  meta=$(timeout 1 head -c $((meta_max_bytes + 1)) -- "$meta_cache" 2>/dev/null | tr '\0' '\037'; echo x)
   meta=${meta%x}
   (( ${#meta} <= meta_max_bytes )) || return 0
 
-  while true; do
-    if IFS= read -r line; then
-      complete=1
-    elif [[ -n $line ]]; then
-      complete=0
-    else
-      break
-    fi
+  # A last row without a newline may be a write still in progress ("80" caught
+  # as "8"), so only newline-terminated rows count: `read` fails on that one.
+  while IFS= read -r line; do
     (( ${#line} <= 128 )) || continue
+    [[ $line == *$'\x1f'* ]] && continue
     [[ ${line: -1} == $'\r' ]] && line=${line::-1}
     # Tab is IFS whitespace, so `read` alone would collapse empty fields and
-    # shift every column; swap tabs for a delimiter that never appears in text.
+    # shift every column; swap tabs for \x1f, which no row may contain.
     IFS=$'\x1f' read -r -a f <<< "${line//$'\t'/$'\x1f'}"
     name=${f[0]:-}
     [[ $name =~ ^[A-Za-z0-9_]+$ ]] || continue
-    # A last row without a newline may be a write still in progress ("80"
-    # caught as "8"), so it only counts when every column is there.
-    (( complete || ${#f[@]} >= 6 )) || continue
     # A cached 0 is "unknown", exactly as a sysfs 0 is.
     if cycles=$(cache_number "${f[1]:-}" 999999) && (( cycles > 0 )); then
       cached_cycles[$name]=$cycles

@@ -85,9 +85,9 @@ default path is the one that matters.
   shows the built-in summary, which does not use this helper.
 
 Write the file atomically (to a temporary file in the same directory, then
-`mv`), and keep it owned by root with mode `0644`. A last row without a newline
-is only used when it has all six columns, but a reader can still catch a file
-rewritten in place halfway through.
+`mv`), and keep it owned by root with mode `0644`. End every row with a
+newline: a last row without one is ignored, since it may be a write still in
+progress.
 
 The values are shown as they are, with no age check. Whatever writes the file
 should refresh it when a pack is swapped. Otherwise a new bay battery shows the
