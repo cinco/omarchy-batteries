@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "cinco.batteries",
   "name": "Batteries",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "Cinco Euzebio",
   "description": "Every battery on the bar. A drop-in replacement for the built-in power widget, for laptops that carry more than one pack.",
   "kinds": [
