@@ -4,7 +4,7 @@ All notable changes to this plugin. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.1.0] - 2026-11-02
 
 ### Added
 
@@ -15,6 +15,10 @@ All notable changes to this plugin. The format follows
   Sysfs values always win, and with no file nothing changes. The plugin does
   not ship a producer. Contributed by [@felixzsh](https://github.com/felixzsh)
   in [#2](https://github.com/cinco/omarchy-batteries/pull/2).
+- The cache is read as untrusted input: at most 16 KiB, with a 1-second
+  timeout. Rows over 128 bytes or without a trailing newline are ignored, and
+  values are range-checked (cycles up to six digits, end threshold 1 to 100,
+  start below end).
 
 ## [1.0.2] - 2026-11-02
 
@@ -62,7 +66,7 @@ All notable changes to this plugin. The format follows
   (`clonedFrom: omarchy.power`), and the existing keybinding and menu
   entries keep working.
 
-[Unreleased]: https://github.com/cinco/omarchy-batteries/compare/v1.0.2...HEAD
+[1.1.0]: https://github.com/cinco/omarchy-batteries/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/cinco/omarchy-batteries/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/cinco/omarchy-batteries/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/cinco/omarchy-batteries/releases/tag/v1.0.0
