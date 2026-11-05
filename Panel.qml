@@ -24,10 +24,8 @@ Panel {
   property int profileIndex: 0
   property bool cursorActive: false
   readonly property bool showPercentage: setting("showPercentage", false) === true
-  // With the percentage shown the button paints a text block wider than an
-  // icon, so the open-panel mark takes the painted width instead of the
-  // icon-sized fraction of the slot the fallback assumes.
-  readonly property real openPanelIndicatorWidth: (showPercentage || multiBattery) && !button.vertical ? button.glyphPaintedWidth : 0
+  // Match the panel mark to the custom readout rather than a single icon.
+  readonly property real openPanelIndicatorWidth: !button.vertical ? readout.implicitWidth : 0
   readonly property bool batteryPresent: {
     var device = UPower.displayDevice
     return !!(device && device.isPresent)
@@ -462,33 +460,70 @@ Panel {
     }
   }
 
-  BarIconButton {
+  WidgetButton {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: {
-      if (root.multiBattery && !vertical) {
-        var packs = root.batteries
-        var parts = []
-        for (var i = 0; i < packs.length; i++) {
-          var icon = root.deviceIcon(packs[i])
-          parts.push(root.showPercentage ? root.devicePercentage(packs[i]) + "% " + icon : icon)
-        }
-        return parts.join("  ")
-      }
-      return root.showPercentage && !vertical
-        ? Math.round(root.batteryFraction * 100) + "% " + root.batteryIcon()
-        : root.batteryIcon()
-    }
-    slotSize: {
-      var packs = root.multiBattery && !vertical ? root.batteries.length : 1
-      return Style.bar.iconSlot * packs * (root.showPercentage && !vertical ? 2 : 1)
-    }
+    labelVisible: false
+    hasVisualContent: root.batteryPresent
+    fixedWidth: vertical ? -1 : Math.max(Style.bar.iconSlot,
+      readout.implicitWidth + Style.bar.iconSlot - Style.bar.iconCanvas)
+    fixedHeight: vertical ? Style.bar.iconSlot : -1
     tooltipText: ""
     onPressed: function(b) {
       if (!root.batteryPresent) return
       if (b === Qt.RightButton) root.togglePercentage()
-      else root.toggle()
+      else if (b === Qt.LeftButton) root.toggle()
+    }
+
+    // BarIconButton fits its entire content to one icon's painted bounds.
+    // Keep labels at bar font size and fit each battery glyph independently.
+    Row {
+      id: readout
+      anchors.centerIn: parent
+      spacing: Style.space(8)
+      scale: button.pressScale
+
+      Repeater {
+        model: root.multiBattery && !button.vertical ? root.batteries : [UPower.displayDevice]
+
+        Row {
+          id: packReadout
+          required property var modelData
+          spacing: Style.space(4)
+          height: Style.bar.iconCanvas
+
+          Text {
+            id: percentage
+            visible: root.showPercentage && !button.vertical
+            textFormat: Text.PlainText
+            text: root.devicePercentage(packReadout.modelData) + "%"
+            font.family: button.fontFamily
+            font.pixelSize: Style.bar.iconFont
+            color: button.foreground
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: (percentageMetrics.descent - percentageMetrics.ascent
+              + percentageMetrics.tightBoundingRect("0").height) / 2
+            renderType: Text.NativeRendering
+          }
+
+          FontMetrics {
+            id: percentageMetrics
+            font: percentage.font
+          }
+
+          OpticalGlyph {
+            width: Style.bar.iconCanvas
+            height: Style.bar.iconCanvas
+            text: root.multiBattery && !button.vertical
+              ? root.deviceIcon(packReadout.modelData) : root.batteryIcon()
+            fontFamily: button.fontFamily
+            fontSize: Style.bar.iconFont
+            paintedSize: Style.bar.iconSize
+            color: button.foreground
+          }
+        }
+      }
     }
   }
 
